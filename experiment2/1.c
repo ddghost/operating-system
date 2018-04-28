@@ -17,7 +17,6 @@ typedef struct{
 int main(int argc, char **argv)
 {
 	key_t shmid;
-	char *p_addr, *c_addr;
 	shared_data *data_ptr;
 	pid_t pid;
 	int parameterNum ;
@@ -27,8 +26,8 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 	parameterNum = atoi(argv[1]) ;
-	if( parameterNum  > MAX_SEQUENCE){
-		fprintf(stderr , "parameter size %d is bigger than %d\n" ,parameterNum , MAX_SEQUENCE);
+	if( parameterNum  > MAX_SEQUENCE || parameterNum < 0){
+		fprintf(stderr , "parameter size error !\n");
 		exit(1);
 	}	
 
@@ -47,16 +46,21 @@ int main(int argc, char **argv)
 		for(int loop = 0 ; loop < (*data_ptr).sequence_size ; loop++){
 			printf("%ld\n" , (*data_ptr).fib_sequence[loop] );
 		}
+		if(shmdt(data_ptr) == -1 ){
+			fprintf(stderr , "Unable to detach\n");
+		}
+		shmctl(shmid , IPC_RMID , NULL);
 		exit(0);
 	}
 	else if (pid == 0){
-		(*data_ptr).fib_sequence[0] = 1;
+		(*data_ptr).fib_sequence[0] = 0;
 		(*data_ptr).fib_sequence[1] = 1;
 		for(int loop = 2 ; loop < (*data_ptr).sequence_size ; loop++){
 			(*data_ptr).fib_sequence[loop] = (*data_ptr).fib_sequence[loop-1] 
 												+ (*data_ptr).fib_sequence[loop-2];
 		}
 		wait(NULL);
+		
 		exit(0);
 	}
 }
