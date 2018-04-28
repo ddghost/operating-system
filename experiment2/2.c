@@ -2,16 +2,26 @@
 #include <unistd.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <string.h>
+#include <errno.h>
+#include <sys/shm.h>
+#include <sys/ipc.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#define PERM S_IRUSR|S_IWUSR
 #define MAX_LINE 80
 #define MAXSTOREDCOMMANDS 3
 typedef struct{
 	char commands[MAXSTOREDCOMMANDS + 1][MAX_LINE];
+	bool ifValid[MAXSTOREDCOMMANDS + 1];
 	int head ;
 	int tail ;
+	int commandsError[MAXSTOREDCOMMANDS + 1];
 }storedCommand;
 
-
+int *ifError;
 storedCommand commands ; 
+bool ifExecvp = true;
 bool ifCatchControlC = false;
 
 void handle_SIGINT(){
@@ -57,7 +67,7 @@ void showCommands(){
 	}
 }
 
-char* getCommand(char firstLetter){
+int getCommandIndex(char firstLetter){
 	int commandsSize = (commands.tail + MAXSTOREDCOMMANDS - commands.head + 2) 
 									% (MAXSTOREDCOMMANDS + 1);
 	if(firstLetter == 0){
@@ -66,10 +76,10 @@ char* getCommand(char firstLetter){
 
 	for(int loop = commandsSize - 1 ; loop >= 0 ; loop--){
 		if(commands.commands[ (loop + commands.head) % (MAXSTOREDCOMMANDS + 1)][0] == firstLetter){
-			return commands.commands[ (loop + commands.head) % (MAXSTOREDCOMMANDS + 1)];
+			return (loop + commands.head) % (MAXSTOREDCOMMANDS + 1);
 		}	
 	}
-	return NULL;
+	return -1;
 }
 
 int main(void)
@@ -78,14 +88,15 @@ int main(void)
 	handler.sa_handler = handle_SIGINT;
 	sigaction(SIGINT , &handler , NULL);
 	initialCommands();
-
+	key_t shmid;
+	shmid = shmget(IPC_PRIVATE, sizeof(int), PERM);
+	ifError = shmat(shmid, 0, 0);
 	char inputBuffer[MAX_LINE]; /* 这个缓存用来存放输入的命令*/
 	int background;
 	
 	/* ==1时,表示在后台运行命令,即在命令后加上'&' */
 	char *args[MAX_LINE/2+1];/* 命令最多40个参数 */
 	while (1){
-	
 		/* 程序在setup中正常结束*/
 		background = 0;
 		printf("COMMAND->"); //输出提示符,没有换行,仅将字符串送入输出缓存
@@ -96,11 +107,18 @@ int main(void)
 		/* 获取下一个输入的命令 */
 		pid_t pid = fork();
 		if(pid == 0){
-			execvp(args[0] , args);
+			if(ifExecvp)
+				*ifError = execvp(args[0] , args);
+			if(*ifError == -1){
+				*ifError = errno;
+				perror("");
+			}
 			exit(1);		
 		}
 		else{
-			if(background==0) wait(NULL);
+			if(background==0) wait( NULL );
+			commands.commandsError[commands.tail] = *ifError;
+			
 		}
 		
 	}
@@ -120,6 +138,7 @@ void setup(char inputBuffer[], char *args[],int *background)
 	/* 读入命令行字符,存入inputBuffer */
 	ifCatchControlC = false;
 	length = read(STDIN_FILENO, inputBuffer, MAX_LINE);
+
 	if(ifCatchControlC){
 		args[0] = NULL;
 		return;
@@ -132,6 +151,7 @@ void setup(char inputBuffer[], char *args[],int *background)
 void solve(int ct , int length, char inputBuffer[], char *args[],int *background ){
 	int i , start;
 	start = -1;
+	ifExecvp = true;
 	if (length == 0) exit(0);
 	/* 输入ctrl+d,结束shell程序 */
 	if (length < 0){
@@ -139,10 +159,12 @@ void solve(int ct , int length, char inputBuffer[], char *args[],int *background
 		exit(-1);
 		/* 出错时用错误码-1结束shell */
 	}/* 检查inputBuffer中的每一个字符 */
-
+	if(inputBuffer[0] == '\n'){
+		args[0] = NULL;
+		return ;
+	}
 	if(  inputBuffer[0] == 'r' && inputBuffer[1] == ' ' ){
 		bool isHistoryCommand = true;
-		
 		if(isHistoryCommand){
 			char firstLetter , *tempBuffer;
 			if(length > 3){
@@ -151,17 +173,22 @@ void solve(int ct , int length, char inputBuffer[], char *args[],int *background
 			else{
 				firstLetter = '\0';
 			}
-			tempBuffer = getCommand(firstLetter) ;
-			if(tempBuffer == NULL){
+			int index = getCommandIndex(firstLetter) ;
+			if(index == -1){
 				printf("\nno such command\n");
 			}
+			else if(commands.commandsError[index] != 0){
+				printf("%s\n" , strerror(commands.commandsError[index]) );
+			
+				ifExecvp = false;
+			}
 			else{
+				char *tempBuffer = commands.commands[index];
 				solve(0 , strlen( tempBuffer ) + 1 , tempBuffer , args , 0);		
 			}
 			return ;
 		}
 	}
-
 	putCommands(inputBuffer);
 	for (i=0 ; i < length ; i++) {
 		switch (inputBuffer[i]){
