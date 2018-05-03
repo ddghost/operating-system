@@ -1,66 +1,32 @@
-#include <stdlib.h>
 #include <stdio.h>
-#include <string.h>
-#include <errno.h>
-#include <unistd.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/ipc.h>
-#include <sys/shm.h>
-#define PERM S_IRUSR|S_IWUSR 
-#define MAX_SEQUENCE 10
-typedef struct{
-	long fib_sequence[MAX_SEQUENCE];
-	int sequence_size;
-}shared_data;
+#include <pthread.h>
 
-int main(int argc, char **argv)
-{
-	key_t shmid;
-	shared_data *data_ptr;
-	pid_t pid;
-	int parameterNum ;
+int arr [100];
 
-	if(argc != 2) {
-		fprintf(stderr, "Usage:%s\n\a", argv[0]);
-		exit(1);
+void *generateFibonacci( void *parameter){
+	int *num = (int *)parameter;
+	if( *num > 100 || *num < 1) {
+		printf("parameter %d out of bound [1,100]\n" , *num);
 	}
-	parameterNum = atoi(argv[1]) ;
-	if( parameterNum  > MAX_SEQUENCE || parameterNum < 0){
-		fprintf(stderr , "parameter size error !\n");
-		exit(1);
-	}	
-
-	if( (shmid = shmget(IPC_PRIVATE, sizeof(shared_data), PERM)) == -1 ) {
-		fprintf(stderr, "Create Share Memory Error:%s\n\a",strerror(errno));
-		exit(1);
+	else{
+		arr[0] = 0;
+		arr[1] = 1;
+		for(int loop = 2 ; loop < *num ; loop++){
+			arr[loop] = arr[loop - 1] + arr[loop - 2];
+		}
 	}
-	data_ptr = shmat(shmid, 0, 0);
-	memset(data_ptr, '\0', sizeof(shared_data) );
-	(*data_ptr).sequence_size = parameterNum;
-	pid = fork();
+	pthread_exit(0);
+}
 
-	if(pid > 0) {
-		sleep(1);
-		
-		for(int loop = 0 ; loop < (*data_ptr).sequence_size ; loop++){
-			printf("%ld\n" , (*data_ptr).fib_sequence[loop] );
-		}
-		if(shmdt(data_ptr) == -1 ){
-			fprintf(stderr , "Unable to detach\n");
-		}
-		shmctl(shmid , IPC_RMID , NULL);
-		exit(0);
-	}
-	else if (pid == 0){
-		(*data_ptr).fib_sequence[0] = 0;
-		(*data_ptr).fib_sequence[1] = 1;
-		for(int loop = 2 ; loop < (*data_ptr).sequence_size ; loop++){
-			(*data_ptr).fib_sequence[loop] = (*data_ptr).fib_sequence[loop-1] 
-												+ (*data_ptr).fib_sequence[loop-2];
-		}
-		wait(NULL);
-		
-		exit(0);
+
+int main(){
+	pthread_t th;
+	int num;
+	scanf("%d" , &num);
+	pthread_create(&th , NULL , generateFibonacci , (void*)&num );
+
+	pthread_join(th , NULL);
+	for(int loop = 0 ; loop < num ; loop++){
+		printf("%d\n" , arr[loop] );
 	}
 }
